@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: news-baby-bot
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: python cloud/bot_cloud.py
+    envVars:
+      TELEGRAM_BOT_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+      GEMINI_API_KEY: ""
