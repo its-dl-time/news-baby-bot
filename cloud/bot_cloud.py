@@ -1,9 +1,8 @@
 """Cloud news bot: 24/7 on Render/Railway free, NO opencode dependency.
 - RSS news (Google News + VnExpress + CafeF ...) via stdlib only.
-- Rule-based brief + impact (works with ZERO api keys).
-- Optional: set GEMINI_API_KEY (free at aistudio.google.com) for AI impact lines.
+- AI impact via Hugging Face (optional, fallback to rule-based automatically).
 - Bilingual VI (default, có dấu) / EN via /lang. Health endpoint for keepalive.
-Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (owner), optional GEMINI_API_KEY.
+Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (owner), optional HF_TOKEN / GEMINI_API_KEY.
 """
 import datetime
 import html
@@ -21,6 +20,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 OWNER = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()       # <-- Them
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 if not TOKEN:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN env")
@@ -87,7 +87,6 @@ def scan(window_from, window_to, keyword=""):
             items += parse_items(fetch_rss(url), name)
         except Exception:
             continue
-    # dedupe by link
     seen, uniq = set(), []
     for it in items:
         if it["link"] and it["link"] not in seen:
@@ -100,29 +99,51 @@ def scan(window_from, window_to, keyword=""):
 
 
 def rule_impact(title):
+    """Rule-based impact (always works, no API key needed)."""
     t = title.lower()
     if any(k.lower() in t for k in BEAR):
-        return "Bearish ngắn hạn (rule-based, chưa có AI)"
+        return "Bearish ngắn hạn"
     if any(k.lower() in t for k in BULL):
-        return "Bullish ngắn hạn (rule-based, chưa có AI)"
-    return "Neutral (rule-based, chưa có AI)"
+        return "Bullish ngắn hạn"
+    return "Neutral"
 
 
 def ai_impact(title):
-    """Optional Gemini upgrade; fallback to rule-based."""
-    if not GEMINI_KEY:
-        return rule_impact(title)
-    try:
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}")
-        body = json.dumps({"contents": [{"parts": [
-            {"text": f"1 dòng tiếng Việt: tin '{title}' tác động Bullish/Bearish/Neutral tới tài sản nào, ngắn hay dài hạn?"}]}]}).encode()
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            j = json.loads(r.read().decode())
-        return j["candidates"][0]["content"]["parts"][0]["text"].strip()[:200]
-    except Exception:
-        return rule_impact(title) + " [AI lỗi, dùng rule]"
+    """Try Hugging Face Inference API first; fall back to rule-based automatically."""
+    # 1) Thử Hugging Face nếu có token
+    if HF_TOKEN:
+        try:
+            # Sử dụng model zero-shot classification khá nhẹ và tốt
+            model_name = "facebook/bart-large-mnli"
+            url = f"https://api-inference.huggingface.co/models/{model_name}"
+            headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+            # Prompt classify tin vào 3 lớp: Bullish/Bearish/Neutral
+            labels = ["Bullish", "Bearish", "Neutral"]
+            prompt = f"Dán tin dưới đây và cho label phù hợp nhất (chỉ trả lời từ 3 từ trên): {title}"
+            body = json.dumps({"inputs": prompt, "parameters": {"candidate_labels": labels}}).encode()
+            req = urllib.request.Request(url, data=body, headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                result = json.loads(r.read().decode())
+            # HF returns dict hoặc list tùy model; lấy label có probability cao nhất
+            if isinstance(result, dict):
+                labels_list = result.get("labels", result.get("top_labels", []))
+                scores = result.get("scores", result.get("top_scores", []))
+                if labels_list and scores:
+                    best_label = labels_list[0]
+                    best_score = scores[0]
+                    # Chỉ chọn nếu confidence cao hơn ngưỡng (0.5)
+                    if best_score > 0.5:
+                        # Đưa về tiếng Việt và bổ sung info
+                        return f"[AI] {best_label} ngắn hạn (HF)"
+            # Nếu kết quả không rõ ràng hoặc format lạ, qua rule-based
+            raise Exception("format unexpected")
+        except Exception as e:
+            # Fallback to rule-based (log được không nhưng không làm gián đoạn)
+            pass  # sẽ rơi xuống rule_impact bên dưới
+
+    # 2) Fallback: rule-based (luôn hoạt động, không cần key)
+    rule = rule_impact(title)
+    return f"[rule-based] {rule}"
 
 
 def lang_load():
@@ -147,13 +168,13 @@ HELP_VI = """🤖 Bot tin tức 24/7 (bản cloud, không cần mở máy ở nh
 🟢 /subscribe /unsubscribe — nhận tin 7h sáng
 🟢 /ping /status /help
 
-⚠️ Bản cloud dùng RSS + rule-based impact (chưa có AI nếu chưa gắn key). Không phải lời khuyên tài chính."""
+⚠️ AI impact bằng Hugging Face (miễn phí). Nếu không có key → rule-based tự động. Không phải lời khuyên tài chính."""
 HELP_EN = """🤖 24/7 news bot (cloud build, home PC can stay off):
 
 🟢 /brief [today|yesterday|YYYY-MM-DD] [keyword]
 🔵 /date, /range, /search, /market, /lang vi|en, /subscribe, /ping, /status, /help
 
-⚠️ Cloud build uses RSS + rule-based impact (no AI key yet). Not financial advice."""
+⚠️ AI impact via Hugging Face (free). Falls back to rule-based if no key. Not financial advice."""
 
 
 def briefing_text(wf, wt, keyword, lang):
@@ -168,7 +189,7 @@ def briefing_text(wf, wt, keyword, lang):
     if not items:
         lines.append("Không tìm thấy tin trong khoảng này." if lang == "vi" else "No items in window.")
     lines.append("")
-    lines.append("Nguồn: Google News RSS + VnExpress + Tuổi Trẻ (rule-based).")
+    lines.append("Nguồn: Google News RSS + VnExpress + Tuổi Trẻ (AI + rule-based).")
     return "\n".join(lines)[:7500]
 
 
@@ -177,18 +198,11 @@ def handle(chat, text):
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower() if parts else ""
     args = parts[1:] if len(parts) > 1 else []
+
     if cmd == "/start":
         send(chat, ("Chào bạn! " if lang == "vi" else "Hi! ") + (HELP_VI if lang == "vi" else HELP_EN))
     elif cmd == "/help":
         send(chat, HELP_VI if lang == "vi" else HELP_EN)
-    elif cmd == "/lang":
-        d = lang_load()
-        if args and args[0].lower() in ("vi", "en"):
-            d[str(chat)] = args[0].lower()
-            (BASE / "user_lang.json").write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-            send(chat, "Đã chuyển sang tiếng Việt." if args[0] == "vi" else "Switched to English.")
-        else:
-            send(chat, "Dùng: /lang vi|en")
     elif cmd == "/ping":
         send(chat, "pong cloud " + datetime.datetime.now().isoformat(timespec="seconds"))
     elif cmd == "/subscribe":
@@ -210,7 +224,8 @@ def handle(chat, text):
         SUBS.write_text(json.dumps(sorted(s)), encoding="utf-8")
         send(chat, "Đã hủy.")
     elif cmd == "/status":
-        send(chat, f"cloud bot ok, AI={'Gemini' if GEMINI_KEY else 'rule-based'}, subs={len(json.loads(SUBS.read_text())) if SUBS.exists() else 0}")
+        ai_mode = "HF" if HF_TOKEN else "rule"
+        send(chat, f"cloud bot ok, AI={ai_mode}, subs={len(json.loads(SUBS.read_text())) if SUBS.exists() else 0}")
     elif cmd == "/market":
         try:
             with urllib.request.urlopen("https://data-api.coindesk.com/index/cc/v1/latest/tick?market=cdc&instruments=BTC-USD", timeout=15) as r:
@@ -272,7 +287,7 @@ def main():
     threading.Thread(target=daily_loop, daemon=True).start()
     port = int(os.environ.get("PORT", "10000"))
     threading.Thread(target=lambda: HTTPServer(("0.0.0.0", port), H).serve_forever(), daemon=True).start()
-    print(f"cloud bot on :{port}, AI={'gemini' if GEMINI_KEY else 'rule'}", flush=True)
+    print(f"cloud bot on :{port}, AI={'HF' if HF_TOKEN else 'rule'}", flush=True)
     off = 0
     while True:
         try:

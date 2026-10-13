@@ -1,2 +1,2 @@
 # Bot uses stdlib only (urllib.request, xml.etree.ElementTree, json, http.server)
-# No third-party packages needed
+# No third-party packages needed (HF Inference API dùng qua urllib như code khác)

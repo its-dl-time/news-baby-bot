@@ -8,4 +8,5 @@ services:
     envVars:
       TELEGRAM_BOT_TOKEN: ""
       TELEGRAM_CHAT_ID: ""
+      HF_TOKEN: ""
       GEMINI_API_KEY: ""
