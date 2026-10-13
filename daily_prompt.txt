@@ -1,0 +1,12 @@
+@news-impact-scraper
+
+Quét tin theo NGÀY / KHOẢNG NGÀY được chỉ định trong Context (target date window), cân bằng global + Việt Nam, bao phủ: finance, economy, stock market, technology, science, crypto, AI.
+
+Yêu cầu output:
+- Bảng: | # | Category | Source | Title | Link | Date (YYYY-MM-DD) | Brief | Impact Prediction |
+- Cột Date phải nằm trong window được giao. Ngoài window → loại bỏ.
+- Link phải là URL đầy đủ, đã verify qua webfetch. Không bịa link.
+- Brief 2-3 dòng, tiếng Việt.
+- Impact: Bullish/Bearish/Neutral/Mixed + ngắn/dài hạn + tài sản ảnh hưởng + confidence + 1 dòng lý do.
+- Sau bảng: Top 3 impacts, Risks / What to watch, Sources checked, Fetched UTC date + window đã lọc.
+- Disclaimer: not financial advice.
