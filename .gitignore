@@ -1,0 +1,5 @@
+# Bot secrets and logs
+.env
+*.log
+__pycache__/
+cloud/__pycache__/
